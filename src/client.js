@@ -7,6 +7,17 @@ var net = require('net');
 var util = require('util');
 const readline = require('readline');
 
+const MSG_LOGIN = 'Hey, what is your name? > ';
+const MSG_PROMPT = 'Send me some JSON love.';
+const MSG_LOGIN_ERROR = 'That don\'t sound right, Try again.';
+const MSG_TIME_RESPONSE = 'The time on deck is %s.';
+const MSG_RANDOM_RESPONSE = 'The random number is %s.';
+const MSG_COUNT_RESPONSE = 'The count is %s.';
+const MSG_HEARTBEAT = 'Whoa! Looks like something nodded off. Hold on while I try to reconnect...';
+const MSG_RESTARTING = 'Restarting session...';
+const MSG_BYE = 'Bye Bye.';
+const MSG_ERROR = 'Woops, something went wrong. - ';
+
 function Client () {
 }
 
@@ -23,12 +34,12 @@ Client.prototype.connect = function (port, host) {
 
 Client.prototype._login = function () {
     if(!this.user) {
-        this.rl.question('Hey, what is your name?> ', function(answer) {
+        this.rl.question(MSG_LOGIN, function(answer) {
             if(answer && answer.trim() != '') {
                 this.user = { "name" : answer };
                 this._createConnection();
             } else {
-                console.log('That don\'t sound right, Try again.');
+                console.log(MSG_LOGIN_ERROR);
                 this._login();
             }
         }.bind(this));
@@ -42,12 +53,20 @@ Client.prototype._createConnection = function () {
     }.bind(this))
         .on('data', this._handleResponse.bind(this))
         .on('end', this._endSession.bind(this));
-}
+};
 
 
 Client.prototype._handleInput = function (line) {
-    this.socket.write(line);
-}
+    try {
+        var data = JSON.parse(line);
+        data.id = this.user.name;
+
+        this.socket.write(JSON.stringify(data));
+    } catch (e) {
+        console.log(util.format(MSG_ERROR, e.message));
+        this.rl.prompt();
+    }
+};
 
 Client.prototype._handleResponse = function (response) {
     var a = response.toString().split('\n');
@@ -57,19 +76,36 @@ Client.prototype._handleResponse = function (response) {
 
     a.forEach(function(element) {
         try {
-            var data = JSON.parse(element)
+            var data = JSON.parse(element);
 
             switch (data.type) {
                 case 'welcome':
                     console.log(data.msg);
                     this.rl.on('line', this._handleInput.bind(this));
-                    console.log('Send me some JSON love.');
+                    console.log(MSG_PROMPT);
+                    this.rl.prompt();
+                    break;
+                case 'msg':
+                    if(data.msg.reply == this.user.name) {
+                        if (data.msg.time) {
+                            console.log(util.format(MSG_TIME_RESPONSE, data.msg.time));
+                            if (data.msg.random && data.msg.random > 30) {
+                                console.log(util.format(MSG_RANDOM_RESPONSE, data.msg.random));
+                            }
+                        } else if (data.msg.count) {
+                            console.log(util.format(MSG_COUNT_RESPONSE, data.msg.count));
+                        }
+                    }
                     this.rl.prompt();
                     break;
                 case 'heartbeat':
-                    console.log('lubdub...');
+                    //console.log('lubdub...');
                     //just in case the server and client machine clocks are off
                     this.lastHeartBeat = Math.floor((new Date).getTime()/1000);
+                    break;
+                case 'error':
+                    console.log(util.format(MSG_ERROR, data.reason));
+                    this.rl.prompt();
                     break;
                 default:
                     console.log(element + '');
@@ -77,22 +113,24 @@ Client.prototype._handleResponse = function (response) {
         } catch (e) {
             //I only care about non heartbeat JSON errors, because I'll get another heartbeat soon enough, or I'll restart the socket
             if(element.indexOf('"heartbeat"') == -1) {
-                console.log('BURP! Pardon me, something weird just happened! - ' + e.message);
+                console.log(util.format(MSG_ERROR, e.message));
                 this.rl.prompt();
             }
         }
     }.bind(this));
-}
+};
 
 Client.prototype._checkHeartbeat = function () {
-    console.log('breath...');
+    //console.log('breath...');
     if(this.lastHeartBeat < (Math.floor((new Date).getTime()/1000) - 2)) {
-        console.log('Whoa! Looks like something nodded off. Hold on while I try to reconnect...');
         clearInterval(this.timer);
-        this.restart = true;
+        this.rl.pause();
         this.socket.end();
+        console.log(MSG_HEARTBEAT);
+        this.restart = true;
+        console.log(MSG_RESTARTING);
     }
-}
+};
 
 Client.prototype._endSession = function () {
     if(this.restart) {
@@ -101,8 +139,8 @@ Client.prototype._endSession = function () {
     } else {
         clearInterval(this.timer);
         this.rl.close();
-        console.log('Bye Bye.');
+        console.log(MSG_BYE);
     }
-}
+};
 
 module.exports = exports = new Client();
