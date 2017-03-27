@@ -10,7 +10,7 @@ const readline = require('readline');
 const MSG_LOGIN = 'Hey, what is your name? > ';
 const MSG_PROMPT = 'Send me some JSON love.';
 const MSG_LOGIN_ERROR = 'That don\'t sound right, Try again.';
-const MSG_TIME_RESPONSE = 'The time on deck is %s.';
+const MSG_TIME_RESPONSE = 'The time on deck is:';
 const MSG_RANDOM_RESPONSE = 'The random number is %s.';
 const MSG_COUNT_RESPONSE = 'The count is %s.';
 const MSG_HEARTBEAT = 'Whoa! Looks like something nodded off. Hold on while I try to reconnect...';
@@ -22,11 +22,7 @@ function Client () {
 }
 
 Client.prototype.connect = function (port, host) {
-    this.rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout,
-        prompt: '> '
-    });
+    this._createReadlineInterface();
     this.port = port;
     this.host = host;
     this._login();
@@ -39,7 +35,7 @@ Client.prototype._login = function () {
                 this.user = { "name" : answer };
                 this._createConnection();
             } else {
-                console.log(MSG_LOGIN_ERROR);
+                this._console_out(MSG_LOGIN_ERROR);
                 this._login();
             }
         }.bind(this));
@@ -55,16 +51,29 @@ Client.prototype._createConnection = function () {
         .on('end', this._endSession.bind(this));
 };
 
+Client.prototype._createReadlineInterface = function () {
+    this.rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+        prompt: '> '
+    });
+    this.rl.on('line', this._handleInput.bind(this));
+};
 
 Client.prototype._handleInput = function (line) {
-    try {
-        var data = JSON.parse(line);
-        data.id = this.user.name;
+    if(line.trim() != '') {
+        if(line == 'quit') {
+            this.socket.end();
+        } else {
+            try {
+                var data = JSON.parse(line);
+                data.id = this.user.name;
 
-        this.socket.write(JSON.stringify(data));
-    } catch (e) {
-        console.log(util.format(MSG_ERROR, e.message));
-        this.rl.prompt();
+                this.socket.write(JSON.stringify(data));
+            } catch (e) {
+                this._console_out(util.format(MSG_ERROR, e.message));
+            }
+        }
     }
 };
 
@@ -80,55 +89,46 @@ Client.prototype._handleResponse = function (response) {
 
             switch (data.type) {
                 case 'welcome':
-                    console.log(data.msg);
-                    this.rl.on('line', this._handleInput.bind(this));
-                    console.log(MSG_PROMPT);
-                    this.rl.prompt();
+                    this._console_out(util.format('%s %s', data.msg, MSG_PROMPT));
                     break;
                 case 'msg':
                     if(data.msg.reply == this.user.name) {
-                        if (data.msg.time) {
-                            console.log(util.format(MSG_TIME_RESPONSE, data.msg.time));
-                            if (data.msg.random && data.msg.random > 30) {
-                                console.log(util.format(MSG_RANDOM_RESPONSE, data.msg.random));
-                            }
+                        if (data.msg.time && data.msg.random) {
+                            this._console_out(this._formatTimeMsg(data.msg.time, data.msg.random));
                         } else if (data.msg.count) {
-                            console.log(util.format(MSG_COUNT_RESPONSE, data.msg.count));
+                            this._console_out(this._formatCountMsg(util.format(MSG_COUNT_RESPONSE, data.msg.count)));
                         }
                     }
-                    this.rl.prompt();
                     break;
                 case 'heartbeat':
-                    //console.log('lubdub...');
+                    //this._console_out('lubdub...');
                     //just in case the server and client machine clocks are off
                     this.lastHeartBeat = Math.floor((new Date).getTime()/1000);
                     break;
                 case 'error':
-                    console.log(util.format(MSG_ERROR, data.reason));
-                    this.rl.prompt();
+                    this._console_out(util.format(MSG_ERROR, data.reason));
                     break;
                 default:
-                    console.log(element + '');
+                    this._console_out(element + '');
             }
         } catch (e) {
             //I only care about non heartbeat JSON errors, because I'll get another heartbeat soon enough, or I'll restart the socket
             if(element.indexOf('"heartbeat"') == -1) {
-                console.log(util.format(MSG_ERROR, e.message));
-                this.rl.prompt();
+                this._console_out(util.format(MSG_ERROR, e.message));
             }
         }
     }.bind(this));
 };
 
 Client.prototype._checkHeartbeat = function () {
-    //console.log('breath...');
+    //this._console_out('breath...');
     if(this.lastHeartBeat < (Math.floor((new Date).getTime()/1000) - 2)) {
+        this.restart = true;
         clearInterval(this.timer);
         this.rl.pause();
         this.socket.end();
-        console.log(MSG_HEARTBEAT);
-        this.restart = true;
-        console.log(MSG_RESTARTING);
+        this._console_out(MSG_HEARTBEAT);
+        this._console_out(MSG_RESTARTING);
     }
 };
 
@@ -138,9 +138,55 @@ Client.prototype._endSession = function () {
         this._createConnection();
     } else {
         clearInterval(this.timer);
+        this._console_out(MSG_BYE);
         this.rl.close();
-        console.log(MSG_BYE);
+        process.exit(0);
     }
+};
+
+Client.prototype._console_out = function (msg) {
+    //handles some quirkiness between readline and console.log
+    readline.clearLine(process.stdout, 0);
+    readline.cursorTo(process.stdout, 0, null);
+    console.log(msg);
+    this.rl.prompt(true);
+}
+
+Client.prototype._formatTimeMsg = function (time, rnd) {
+    var d = new Date(time), rndMsg = '';
+
+    var tzo = (new Date().getTimezoneOffset()/60) * (-1);
+    d.setHours(d.getHours() + tzo);
+
+    if (rnd > 30) {
+        rndMsg = util.format(MSG_RANDOM_RESPONSE, rnd);
+    }
+
+    return util.format(
+        `\x1b[37m***************************************************************
+        
+    %s\x1b[0m
+    \x1b[47m\x1b[34m %s \x1b[0m
+    \x1b[47m\x1b[34m %s \x1b[0m
+    \x1b[37m%s\x1b[0m
+    
+\x1b[37m***************************************************************\x1b[0m`,
+        MSG_TIME_RESPONSE,
+        d.toLocaleTimeString(),
+        d.toDateString(),
+        rndMsg
+    );
+};
+
+Client.prototype._formatCountMsg = function (msg) {
+    return util.format(
+        `\x1b[37m***************************************************************
+        
+    %s
+    
+***************************************************************\x1b[0m`,
+        msg
+    );
 };
 
 module.exports = exports = new Client();
