@@ -1,7 +1,10 @@
 {
   "name": "h_project",
   "version": "0.0.1",
-  "scripts" : {
+  "scripts": {
     "start": "node index.js"
+  },
+  "dependencies": {
+    "ora": "^1.2.0"
   }
 }

@@ -7,6 +7,8 @@ var net = require('net');
 var util = require('util');
 const readline = require('readline');
 
+const ora = require('ora');
+
 const MSG_LOGIN = 'Hey, what is your name? > ';
 const MSG_PROMPT = 'Send me some JSON love.';
 const MSG_LOGIN_ERROR = 'That don\'t sound right, Try again.';
@@ -15,6 +17,7 @@ const MSG_RANDOM_RESPONSE = 'The random number is %s.';
 const MSG_COUNT_RESPONSE = 'The count is %s.';
 const MSG_HEARTBEAT = 'Whoa! Looks like something nodded off. Hold on while I try to reconnect...';
 const MSG_RESTARTING = 'Restarting session...';
+const MSG_SPINNER = 'Hold up a sec...'
 const MSG_BYE = 'Bye Bye.';
 const MSG_ERROR = 'Woops, something went wrong. - ';
 
@@ -69,6 +72,10 @@ Client.prototype._handleInput = function (line) {
                 var data = JSON.parse(line);
                 data.id = this.user.name;
 
+                if(data.request == 'time' || data.request == 'count') {
+                    this.spinner = ora(MSG_SPINNER).start();
+                }
+
                 this.socket.write(JSON.stringify(data));
             } catch (e) {
                 this._console_out(util.format(MSG_ERROR, e.message));
@@ -93,6 +100,7 @@ Client.prototype._handleResponse = function (response) {
                     break;
                 case 'msg':
                     if(data.msg.reply == this.user.name) {
+                        this.spinner.stop();
                         if (data.msg.time && data.msg.random) {
                             this._console_out(this._formatTimeMsg(data.msg.time, data.msg.random));
                         } else if (data.msg.count) {
@@ -106,6 +114,10 @@ Client.prototype._handleResponse = function (response) {
                     this.lastHeartBeat = Math.floor((new Date).getTime()/1000);
                     break;
                 case 'error':
+                    if(this.spinner) {
+                        this.spinner.stop();
+                    }
+
                     this._console_out(util.format(MSG_ERROR, data.reason));
                     break;
                 default:
@@ -127,6 +139,9 @@ Client.prototype._checkHeartbeat = function () {
         clearInterval(this.timer);
         this.rl.pause();
         this.socket.end();
+        if(this.spinner) {
+            this.spinner.stop();
+        }
         this._console_out(MSG_HEARTBEAT);
         this._console_out(MSG_RESTARTING);
     }
@@ -137,6 +152,9 @@ Client.prototype._endSession = function () {
         this.restart = false;
         this._createConnection();
     } else {
+        if(this.spinner) {
+            this.spinner.stop();
+        }
         clearInterval(this.timer);
         this._console_out(MSG_BYE);
         this.rl.close();
@@ -150,7 +168,7 @@ Client.prototype._console_out = function (msg) {
     readline.cursorTo(process.stdout, 0, null);
     console.log(msg);
     this.rl.prompt(true);
-}
+};
 
 Client.prototype._formatTimeMsg = function (time, rnd) {
     var d = new Date(time), rndMsg = '';
