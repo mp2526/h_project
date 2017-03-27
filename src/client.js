@@ -64,6 +64,7 @@ Client.prototype._createReadlineInterface = function () {
 };
 
 Client.prototype._handleInput = function (line) {
+    //Handle stdin from readline 'line' event
     if(line.trim() != '') {
         if(line == 'quit') {
             this.socket.end();
@@ -85,6 +86,7 @@ Client.prototype._handleInput = function (line) {
 };
 
 Client.prototype._handleResponse = function (response) {
+    //Handle response from server
     var a = response.toString().split('\n');
 
     if(a[a.length - 1] == '')
